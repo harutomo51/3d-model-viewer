@@ -1,5 +1,5 @@
-import React, { useRef, useState, useEffect, Suspense } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
+import React, { useRef, useState, useEffect, Suspense, useCallback } from 'react';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, useGLTF, useFBX, useTexture, Environment, Stage } from '@react-three/drei';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader';
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader';
@@ -7,6 +7,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import * as THREE from 'three';
 import { PerspectiveCamera } from 'three';
+import { SkeletonHelper } from 'three';
 
 // モデルの種類を定義
 type ModelType = 'gltf' | 'glb' | 'obj' | 'fbx';
@@ -320,6 +321,72 @@ const environmentPresets = [
   'lobby'
 ];
 
+// モデル情報を計算するカスタムフック
+const useModelInfo = (scene: THREE.Scene) => {
+  const [polygonCount, setPolygonCount] = useState<number>(0);
+  
+  // モデルのポリゴン数を計算
+  useEffect(() => {
+    let totalPolygons = 0;
+    
+    scene.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        const geometry = object.geometry;
+        if (geometry.index !== null) {
+          // インデックス付きジオメトリの場合
+          totalPolygons += geometry.index.count / 3;
+        } else if (geometry.attributes.position) {
+          // インデックスなしジオメトリの場合
+          totalPolygons += geometry.attributes.position.count / 3;
+        }
+      }
+    });
+    
+    setPolygonCount(Math.round(totalPolygons));
+  }, [scene]);
+  
+  return { polygonCount };
+};
+
+// モデル情報を表示するコンポーネント
+const ModelInfoDisplay = () => {
+  const { scene } = useThree();
+  const { polygonCount } = useModelInfo(scene);
+  
+  return null; // 実際の表示はModelViewerコンポーネントで行う
+};
+
+// キャンバスのリサイズを処理するカスタムコンポーネント
+const CanvasResizer = () => {
+  const { gl, camera } = useThree();
+  
+  useEffect(() => {
+    const handleResize = () => {
+      // レンダラーのサイズを更新
+      gl.setSize(window.innerWidth, window.innerHeight);
+      
+      // カメラのアスペクト比を更新
+      if (camera instanceof THREE.PerspectiveCamera) {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+      }
+    };
+    
+    // 初期サイズを設定
+    handleResize();
+    
+    // リサイズイベントリスナーを追加
+    window.addEventListener('resize', handleResize);
+    
+    // クリーンアップ
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [gl, camera]);
+  
+  return null;
+};
+
 // メインのモデルビューアーコンポーネント
 interface ModelViewerProps {
   modelUrl?: string;
@@ -330,85 +397,59 @@ interface ModelViewerProps {
 const ModelViewer: React.FC<ModelViewerProps> = ({
   modelUrl,
   width = '100%',
-  height = '500px',
+  height = '100%',
 }) => {
   const [url, setUrl] = useState<string | null>(modelUrl || null);
-  const [type, setType] = useState<ModelType | null>(modelUrl ? getModelType(modelUrl) : null);
-  const [mtlUrl, setMtlUrl] = useState<string | null>(null);
+  const [type, setType] = useState<ModelType | null>(null);
   const [showBones, setShowBones] = useState<boolean>(false);
   const [environmentPreset, setEnvironmentPreset] = useState<string>('city');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const mtlInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [fileName, setFileName] = useState<string>('');
+  const [fileSize, setFileSize] = useState<number>(0);
+  const [polygonCount, setPolygonCount] = useState<number>(0);
+
+  // ポリゴン数を更新する関数
+  const updatePolygonCount = useCallback((count: number) => {
+    setPolygonCount(count);
+  }, []);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      try {
-        const fileType = getModelType(file.name);
-        const objectUrl = URL.createObjectURL(file);
-        setUrl(objectUrl);
-        setType(fileType);
-        
-        // OBJファイルの場合、MTLファイルも探す
-        if (fileType === 'obj') {
-          // 同じフォルダから同名の.mtlファイルを自動検出する試み
-          const mtlFileName = file.name.replace(/\.obj$/i, '.mtl');
-          const mtlFile = Array.from(event.target.files || []).find(f => f.name.toLowerCase() === mtlFileName.toLowerCase());
-          
-          if (mtlFile) {
-            const mtlObjectUrl = URL.createObjectURL(mtlFile);
-            setMtlUrl(mtlObjectUrl);
-          } else {
-            setMtlUrl(null);
-          }
-        }
-      } catch (error) {
-        alert(error);
-      }
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    setFileName(file.name);
+    setFileSize(file.size); // ファイルサイズを保存
+    
+    const fileType = getModelType(file.name);
+    
+    if (fileType) {
+      const objectUrl = URL.createObjectURL(file);
+      setUrl(objectUrl);
+      setType(fileType);
+    } else {
+      alert('サポートされていないファイル形式です。');
     }
   };
 
   const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    
-    // ドロップされたすべてのファイルを取得
-    const files = Array.from(event.dataTransfer.files);
-    
-    // OBJファイルとMTLファイルを探す
-    const objFile = files.find(file => file.name.toLowerCase().endsWith('.obj'));
-    
-    if (objFile) {
-      try {
-        const objectUrl = URL.createObjectURL(objFile);
+    event.stopPropagation();
+
+    if (event.dataTransfer.files && event.dataTransfer.files.length > 0) {
+      const file = event.dataTransfer.files[0];
+      setFileName(file.name);
+      setFileSize(file.size); // ファイルサイズを保存
+      
+      const fileType = getModelType(file.name);
+      
+      if (fileType) {
+        const objectUrl = URL.createObjectURL(file);
         setUrl(objectUrl);
-        setType('obj');
-        
-        // 同じ名前のMTLファイルを探す
-        const mtlFileName = objFile.name.replace(/\.obj$/i, '.mtl');
-        const mtlFile = files.find(file => file.name.toLowerCase() === mtlFileName.toLowerCase());
-        
-        if (mtlFile) {
-          const mtlObjectUrl = URL.createObjectURL(mtlFile);
-          setMtlUrl(mtlObjectUrl);
-        } else {
-          setMtlUrl(null);
-        }
-      } catch (error) {
-        alert(error);
-      }
-    } else {
-      // OBJファイルがない場合は最初のファイルを使用
-      const file = files[0];
-      if (file) {
-        try {
-          const fileType = getModelType(file.name);
-          const objectUrl = URL.createObjectURL(file);
-          setUrl(objectUrl);
-          setType(fileType);
-          setMtlUrl(null); // OBJ以外の場合はMTLをクリア
-        } catch (error) {
-          alert(error);
-        }
+        setType(fileType);
+      } else {
+        alert('サポートされていないファイル形式です。');
       }
     }
   };
@@ -421,137 +462,224 @@ const ModelViewer: React.FC<ModelViewerProps> = ({
     fileInputRef.current?.click();
   };
 
+  // ポリゴン数を監視するコンポーネント
+  const PolygonCounter = () => {
+    const { scene } = useThree();
+    
+    useEffect(() => {
+      let totalPolygons = 0;
+      
+      scene.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          const geometry = object.geometry;
+          if (geometry.index !== null) {
+            // インデックス付きジオメトリの場合
+            totalPolygons += geometry.index.count / 3;
+          } else if (geometry.attributes.position) {
+            // インデックスなしジオメトリの場合
+            totalPolygons += geometry.attributes.position.count / 3;
+          }
+        }
+      });
+      
+      updatePolygonCount(Math.round(totalPolygons));
+    }, [scene]);
+    
+    return null;
+  };
+
+  // ファイルサイズを人間が読みやすい形式に変換する関数
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
   return (
     <div
+      ref={containerRef}
       style={{
-        width,
-        height,
-        position: 'relative',
+        width: '100%',
+        height: '100vh',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
         overflow: 'hidden',
-        borderRadius: '8px',
-        border: '2px dashed #ccc',
       }}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
     >
+      {/* モデル情報を右上に表示 */}
+      {url && type && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 10,
+            right: 10,
+            zIndex: 100,
+            background: 'rgba(0, 0, 0, 0.5)',
+            color: 'white',
+            padding: '10px',
+            borderRadius: '5px',
+            fontSize: '14px',
+            fontFamily: 'monospace',
+          }}
+        >
+          <div>ファイル名: {fileName}</div>
+          <div>ファイルサイズ: {formatFileSize(fileSize)}</div>
+          <div>ポリゴン数: {polygonCount.toLocaleString()} ポリゴン</div>
+        </div>
+      )}
+
       {url && type ? (
-        <>
-          <Canvas camera={{ position: [0, 0, 10], fov: 45, near: 0.1, far: 1000 }}>
-            <ambientLight intensity={0.5} />
-            <spotLight position={[10, 10, 10]} angle={0.15} penumbra={1} />
-            <pointLight position={[-10, -10, -10]} />
-            <Suspense fallback={null}>
-              {(type === 'glb' || type === 'gltf') ? (
-                <ModelLoader url={url} type={type} mtlUrl={mtlUrl} showBones={showBones} environmentPreset={environmentPreset} />
-              ) : (
-                <Stage environment="city" intensity={0.6} adjustCamera={false}>
-                  <ModelLoader url={url} type={type} mtlUrl={mtlUrl} showBones={showBones} />
-                </Stage>
-              )}
-            </Suspense>
-            <OrbitControls makeDefault enablePan={true} enableZoom={true} enableRotate={true} />
-          </Canvas>
-          
-          {type === 'fbx' && (
-            <div
-              style={{
-                position: 'absolute',
-                bottom: '10px',
-                right: '10px',
-                background: 'rgba(0, 0, 0, 0.5)',
-                padding: '8px',
-                borderRadius: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                color: 'white',
-              }}
-            >
-              <label style={{ marginRight: '8px', userSelect: 'none' }}>
-                <input
-                  type="checkbox"
-                  checked={showBones}
-                  onChange={(e) => setShowBones(e.target.checked)}
-                  style={{ marginRight: '4px' }}
-                />
-                ボーンを表示
-              </label>
-            </div>
-          )}
-          
-          {(type === 'glb' || type === 'gltf') && (
-            <div
-              style={{
-                position: 'absolute',
-                bottom: '10px',
-                right: '10px',
-                background: 'rgba(0, 0, 0, 0.5)',
-                padding: '8px',
-                borderRadius: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                color: 'white',
-              }}
-            >
-              <label style={{ marginRight: '8px', userSelect: 'none' }}>
-                環境マップ:
-                <select
-                  value={environmentPreset}
-                  onChange={(e) => setEnvironmentPreset(e.target.value)}
-                  style={{
-                    marginLeft: '8px',
-                    padding: '4px',
-                    borderRadius: '4px',
-                    background: '#333',
-                    color: 'white',
-                    border: '1px solid #555',
-                  }}
-                >
-                  {environmentPresets.map((preset) => (
-                    <option key={preset} value={preset}>
-                      {preset}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          )}
-        </>
+        <Canvas
+          camera={{ position: [0, 0, 10], fov: 45 }}
+          style={{ 
+            background: '#222222',
+            width: '100%',
+            height: '100%',
+          }}
+          gl={{ antialias: true }}
+          dpr={[1, 2]}
+        >
+          <CanvasResizer />
+          <PolygonCounter />
+          <ambientLight intensity={0.7} />
+          <pointLight position={[10, 10, 10]} intensity={1.5} />
+          <Suspense fallback={null}>
+            {(type === 'glb' || type === 'gltf') ? (
+              <ModelLoader url={url} type={type} showBones={showBones} environmentPreset={environmentPreset} />
+            ) : (
+              <Stage environment="city" intensity={0.8} adjustCamera={false}>
+                <ModelLoader url={url} type={type} showBones={showBones} />
+              </Stage>
+            )}
+          </Suspense>
+          <OrbitControls makeDefault />
+        </Canvas>
       ) : (
         <div
           style={{
+            width: '100%',
+            height: '100%',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'center',
             alignItems: 'center',
-            height: '100%',
-            padding: '20px',
-            textAlign: 'center',
+            background: '#222222',
+            border: '2px dashed #555',
+            borderRadius: '8px',
           }}
         >
-          <p>ここにモデルファイルをドラッグ＆ドロップするか、ファイルを選択してください</p>
-          <p>対応形式: GLB, GLTF, OBJ, FBX</p>
-          <button
-            onClick={handleButtonClick}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#0070f3',
+          <p style={{ color: '#ffffff' }}>3Dモデルをドラッグ＆ドロップするか、ファイルを選択してください</p>
+        </div>
+      )}
+
+      {/* ファイル選択ボタンと現在のファイル名を左下に常に表示 */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 10,
+          left: 10,
+          zIndex: 100,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+        }}
+      >
+        <button
+          onClick={handleButtonClick}
+          style={{
+            background: 'rgba(74, 144, 226, 0.7)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            padding: '8px 12px',
+            cursor: 'pointer',
+          }}
+        >
+          ファイルを選択
+        </button>
+        {fileName && (
+          <span style={{ 
+            background: 'rgba(255, 255, 255, 0.3)',
+            color: 'white',
+            padding: '5px 10px', 
+            borderRadius: '4px',
+            maxWidth: '300px',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap'
+          }}>
+            {fileName}
+          </span>
+        )}
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          style={{ display: 'none' }}
+          accept=".glb,.gltf,.obj,.fbx"
+        />
+      </div>
+
+      {url && type && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 10,
+            left: fileName ? '400px' : '150px',
+            zIndex: 100,
+            display: 'flex',
+            gap: '10px',
+          }}
+        >
+          {type === 'fbx' && (
+            <label style={{ 
               color: 'white',
-              border: 'none',
-              borderRadius: '5px',
-              cursor: 'pointer',
-              marginTop: '10px',
-            }}
-          >
-            ファイルを選択
-          </button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-            accept=".glb,.gltf,.obj,.fbx,.mtl"
-            multiple
-            style={{ display: 'none' }}
-          />
+              background: 'rgba(74, 144, 226, 0.7)',
+              padding: '5px', 
+              borderRadius: '4px' 
+            }}>
+              <input
+                type="checkbox"
+                checked={showBones}
+                onChange={(e) => setShowBones(e.target.checked)}
+              />
+              ボーンを表示
+            </label>
+          )}
+
+          {(type === 'glb' || type === 'gltf') && (
+            <select
+              value={environmentPreset}
+              onChange={(e) => setEnvironmentPreset(e.target.value)}
+              style={{
+                padding: '5px',
+                borderRadius: '4px',
+                border: 'none',
+                background: 'rgba(74, 144, 226, 0.7)',
+                color: 'white',
+              }}
+            >
+              <option value="sunset">夕暮れ</option>
+              <option value="dawn">夜明け</option>
+              <option value="night">夜</option>
+              <option value="warehouse">倉庫</option>
+              <option value="forest">森</option>
+              <option value="apartment">アパート</option>
+              <option value="studio">スタジオ</option>
+              <option value="city">都市</option>
+              <option value="park">公園</option>
+              <option value="lobby">ロビー</option>
+            </select>
+          )}
         </div>
       )}
     </div>
