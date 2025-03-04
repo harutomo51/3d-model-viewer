@@ -1,36 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 3Dモデルビューアー
 
-## Getting Started
+Next.jsとThree.jsを使用した3Dモデルビューアーアプリケーションです。GLB、GLTF、OBJ、FBXファイル形式に対応しています。
 
-First, run the development server:
+## 機能
+
+- 複数の3Dファイル形式（GLB、GLTF、OBJ、FBX）のサポート
+- ドラッグ＆ドロップによるファイルアップロード
+- ファイル選択ダイアログによるファイルアップロード
+- 3Dモデルの回転、ズーム、移動機能
+- レスポンシブデザイン
+
+## 技術スタック
+
+- [Next.js](https://nextjs.org/) - Reactフレームワーク
+- [Three.js](https://threejs.org/) - 3Dグラフィックスライブラリ
+- [React Three Fiber](https://github.com/pmndrs/react-three-fiber) - Three.jsのReactレンダラー
+- [React Three Drei](https://github.com/pmndrs/drei) - React Three Fiberのヘルパーコンポーネント
+- [TypeScript](https://www.typescriptlang.org/) - 型付きJavaScript
+
+## 始め方
+
+### 前提条件
+
+- Node.js 18.0.0以上
+- npm 9.0.0以上
+
+### インストール
 
 ```bash
+# リポジトリのクローン
+git clone https://github.com/yourusername/3d-model-viewer.git
+cd 3d-model-viewer
+
+# 依存関係のインストール
+npm install
+
+# 開発サーバーの起動
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+ブラウザで [http://localhost:3000](http://localhost:3000) を開いてアプリケーションを確認できます。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 使い方
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. アプリケーションにアクセスします。
+2. 3Dモデルファイル（GLB、GLTF、OBJ、FBX）をドラッグ＆ドロップするか、「ファイルを選択」ボタンをクリックしてファイルを選択します。
+3. モデルが表示されたら、以下の操作が可能です：
+   - 左クリック＋ドラッグ：モデルを回転
+   - ホイール：ズームイン/アウト
+   - 右クリック＋ドラッグ：モデルを移動
 
-## Learn More
+## ライセンス
 
-To learn more about Next.js, take a look at the following resources:
+[MIT](LICENSE)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 謝辞
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [Three.js](https://threejs.org/)
+- [React Three Fiber](https://github.com/pmndrs/react-three-fiber)
+- [React Three Drei](https://github.com/pmndrs/drei)
